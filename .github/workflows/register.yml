@@ -1,0 +1,55 @@
+name: Twitch Register
+
+on:
+  workflow_dispatch:
+    inputs:
+      cdk_api_url:
+        description: "CDK管理系统地址 (例: http://1.2.3.4:5000)"
+        required: true
+        type: string
+      concurrency:
+        description: "每个Job的并发线程数"
+        required: true
+        default: "3"
+        type: string
+      job_count:
+        description: "启动的Job数量"
+        required: true
+        default: "1"
+        type: string
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.gen.outputs.matrix }}
+    steps:
+      - id: gen
+        run: |
+          echo "matrix=$(python3 -c "import json; print(json.dumps({'id': list(range(1, ${{ inputs.job_count }} + 1))}))")" >> "$GITHUB_OUTPUT"
+
+  register:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          playwright install --with-deps chromium
+
+      - name: Run registration
+        run: |
+          python main.py \
+            --api-url "${{ inputs.cdk_api_url }}" \
+            -w ${{ inputs.concurrency }} \
+            -n 0

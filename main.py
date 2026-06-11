@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument("-n", "--count", type=int, default=None, help="Number of accounts to create (0=unlimited)")
     parser.add_argument("-w", "--concurrency", type=int, default=None, help="Concurrent workers")
     parser.add_argument("--headed", action="store_true", help="Run browser in headed mode (for debugging)")
+    parser.add_argument("--api-url", default=None, help="CDK API base URL")
+    parser.add_argument("--api-token", default=None, help="CDK API token")
     return parser.parse_args()
 
 
@@ -43,6 +45,10 @@ async def main():
         cfg["worker"]["concurrency"] = args.concurrency
     if args.headed:
         cfg["browser"]["headless"] = False
+    if args.api_url:
+        cfg["cdk_api"]["base_url"] = args.api_url
+    if args.api_token:
+        cfg["cdk_api"]["api_token"] = args.api_token
 
     logger.info("Twitch Registration Tool starting")
     logger.info(f"Config: concurrency={cfg['worker']['concurrency']}, count={cfg['worker']['total_count'] or 'unlimited'}")
