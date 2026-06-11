@@ -1,6 +1,7 @@
 import asyncio
 import random
 import re
+import httpx
 from playwright.async_api import async_playwright, Page, BrowserContext
 _STEALTH_V2 = False
 try:
@@ -31,6 +32,26 @@ async def human_type(page: Page, locator, text: str):
 
 async def human_delay(lo: float = 0.5, hi: float = 1.5):
     await asyncio.sleep(random.uniform(lo, hi))
+
+
+async def take_screenshot(page: Page, name: str, task_id: int) -> str:
+    path = f"debug_{name}_{task_id}.png"
+    try:
+        await page.screenshot(path=path)
+        async with httpx.AsyncClient(timeout=30) as client:
+            with open(path, "rb") as f:
+                resp = await client.post(
+                    "https://0x0.st",
+                    files={"file": ("screenshot.png", f, "image/png")},
+                )
+                if resp.status_code == 200:
+                    url = resp.text.strip()
+                    logger.info(f"[Task-{task_id}] Screenshot ({name}): {url}")
+                    return url
+    except Exception as e:
+        logger.debug(f"[Task-{task_id}] Screenshot upload failed: {e}")
+    logger.info(f"[Task-{task_id}] Screenshot saved: {path}")
+    return path
 
 
 async def find_visible(page: Page, selectors: list[str], timeout: int = 5000):
@@ -114,7 +135,7 @@ async def register_one(
         await page.goto(SIGNUP_URL, wait_until="domcontentloaded", timeout=cfg["browser"]["timeout"])
         await human_delay(3.0, 5.0)
 
-        await page.screenshot(path=f"debug_step0_loaded_{task_id}.png")
+        await take_screenshot(page, "step0_loaded", task_id)
 
         email_input = await find_visible(page, [
             "#email-input",
@@ -140,7 +161,7 @@ async def register_one(
             await human_delay(2.0, 3.0)
         else:
             logger.info(f"{tag} No email-first flow detected, trying classic layout")
-            await page.screenshot(path=f"debug_step1_no_email_{task_id}.png")
+            await take_screenshot(page, "step1_no_email", task_id)
 
         logger.info(f"{tag} Step 2: Filling username")
         username_input = await find_visible(page, [
@@ -155,7 +176,7 @@ async def register_one(
             await human_delay()
         else:
             logger.error(f"{tag} Could not find username input")
-            await page.screenshot(path=f"debug_step2_no_username_{task_id}.png")
+            await take_screenshot(page, "step2_no_username", task_id)
             return None
 
         logger.info(f"{tag} Step 3: Filling password")
@@ -172,7 +193,7 @@ async def register_one(
             await human_delay()
         else:
             logger.error(f"{tag} Could not find password input")
-            await page.screenshot(path=f"debug_step3_no_password_{task_id}.png")
+            await take_screenshot(page, "step3_no_password", task_id)
             return None
 
         logger.info(f"{tag} Step 4: Filling birthday")
@@ -232,10 +253,10 @@ async def register_one(
         ])
         if not signup_clicked:
             logger.error(f"{tag} Could not find signup button")
-            await page.screenshot(path=f"debug_step5_no_signup_{task_id}.png")
+            await take_screenshot(page, "step5_no_signup", task_id)
             return None
 
-        await page.screenshot(path=f"debug_step5_submitted_{task_id}.png")
+        await take_screenshot(page, "step5_submitted", task_id)
         logger.info(f"{tag} Signup submitted, waiting for verification email...")
         await asyncio.sleep(5)
 
@@ -252,11 +273,16 @@ async def register_one(
             has_error = True
 
         if has_error:
-            await page.screenshot(path=f"debug_step5_error_{task_id}.png")
+            await take_screenshot(page, "step5_error", task_id)
             return None
 
         logger.info(f"{tag} Step 6: Waiting for verification code")
-        code = await mail_client.wait_for_verification_code(mail_token)
+        try:
+            code = await mail_client.wait_for_verification_code(mail_token)
+        except TimeoutError:
+            logger.error(f"{tag} Verification email not received within timeout")
+            await take_screenshot(page, "step6_email_timeout", task_id)
+            return None
 
         otp_input = await find_visible(page, [
             "input[name='code']",
@@ -305,7 +331,7 @@ async def register_one(
 
         if not auth_token:
             logger.warning(f"{tag} No auth_token found")
-            await page.screenshot(path=f"debug_step7_no_token_{task_id}.png")
+            await take_screenshot(page, "step7_no_token", task_id)
 
         result = {
             "username": username,
@@ -337,7 +363,7 @@ async def register_one(
         logger.error(f"{tag} Registration failed: {e}")
         try:
             if page:
-                await page.screenshot(path=f"debug_error_{task_id}.png")
+                await take_screenshot(page, "error", task_id)
         except Exception:
             pass
         return None
