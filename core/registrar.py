@@ -32,26 +32,22 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
         logger.debug(f"[Task-{task_id}] Screenshot capture failed: {e}")
         return ""
 
-    upload_targets = [
-        ("catbox.moe", "https://catbox.moe/user/api.php",
-         {"reqtype": "fileupload"}, "fileToUpload"),
-        ("0x0.st", "https://0x0.st", {}, "file"),
-    ]
-    async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
-        for svc_name, url, data, file_key in upload_targets:
-            try:
-                with open(path, "rb") as f:
-                    resp = await client.post(
-                        url,
-                        data=data,
-                        files={file_key: ("screenshot.png", f, "image/png")},
-                    )
-                    if resp.status_code == 200:
-                        link = resp.text.strip()
-                        logger.info(f"[Task-{task_id}] Screenshot ({name}): {link}")
-                        return link
-            except Exception:
-                continue
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+            srv_resp = await client.get("https://api.gofile.io/servers")
+            server = srv_resp.json()["data"]["servers"][0]["name"]
+            with open(path, "rb") as f:
+                up_resp = await client.post(
+                    f"https://{server}.gofile.io/contents",
+                    files={"file": ("screenshot.png", f, "image/png")},
+                )
+                data = up_resp.json()
+                if data.get("status") == "ok":
+                    link = data["data"]["downloadPage"]
+                    logger.info(f"[Task-{task_id}] Screenshot ({name}): {link}")
+                    return link
+    except Exception as e:
+        logger.debug(f"[Task-{task_id}] gofile upload error: {e}")
 
     logger.warning(f"[Task-{task_id}] Screenshot upload failed, saved locally: {path}")
     logger.warning(f"[Task-{task_id}] -> Download from Actions tab -> Artifacts -> debug-screenshots")
