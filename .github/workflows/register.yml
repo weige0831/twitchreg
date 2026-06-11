@@ -7,10 +7,15 @@ on:
         description: "CDK管理系统地址 (例: http://1.2.3.4:5000)"
         required: true
         type: string
+      mail_domain:
+        description: "注册邮箱域名"
+        required: true
+        default: "olsbvgq.shop"
+        type: string
       concurrency:
         description: "每个Job的并发线程数"
         required: true
-        default: "3"
+        default: "1"
         type: string
       job_count:
         description: "启动的Job数量"
@@ -51,5 +56,14 @@ jobs:
         run: |
           python main.py \
             --api-url "${{ inputs.cdk_api_url }}" \
+            --mail-domain "${{ inputs.mail_domain }}" \
             -w ${{ inputs.concurrency }} \
             -n 0
+
+      - name: Upload debug screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-screenshots-${{ matrix.id }}
+          path: debug_*.png
+          if-no-files-found: ignore

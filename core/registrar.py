@@ -150,6 +150,7 @@ async def register_one(
 
     pw = None
     browser = None
+    page = None
     try:
         pw = await async_playwright().start()
         browser = await pw.chromium.launch(
@@ -172,56 +173,54 @@ async def register_one(
             await _stealth_async_v1(page)
 
         logger.info(f"{tag} Navigating to signup page")
-        await page.goto(SIGNUP_URL, wait_until="networkidle", timeout=cfg["browser"]["timeout"])
-        await human_delay(1.0, 2.0)
+        await page.goto(SIGNUP_URL, wait_until="domcontentloaded", timeout=cfg["browser"]["timeout"])
+        await human_delay(2.0, 4.0)
+
+        await page.wait_for_load_state("load", timeout=15000)
 
         await switch_to_email_tab(page)
 
-        username_selectors = [
+        async def try_fill(selectors, value, field_name):
+            for sel in selectors:
+                el = page.locator(sel).first
+                if await el.count() > 0 and await el.is_visible():
+                    await human_type(page, sel, value)
+                    logger.debug(f"{tag} Filled {field_name} via {sel}")
+                    return True
+            logger.warning(f"{tag} Could not find {field_name} input")
+            return False
+
+        await try_fill([
             "#signup-username",
             "input[name='username']",
             "input[autocomplete='username']",
             "[data-a-target='signup-username-input'] input",
             "input[aria-label='Username']",
-        ]
-        for sel in username_selectors:
-            el = page.locator(sel).first
-            if await el.count() > 0 and await el.is_visible():
-                await human_type(page, sel, username)
-                break
+        ], username, "username")
         await human_delay()
 
-        password_selectors = [
+        await try_fill([
             "#signup-password",
             "input[name='password']",
             "input[autocomplete='new-password']",
             "[data-a-target='signup-password-input'] input",
             "input[aria-label='Password']",
-        ]
-        for sel in password_selectors:
-            el = page.locator(sel).first
-            if await el.count() > 0 and await el.is_visible():
-                await human_type(page, sel, password)
-                break
+        ], password, "password")
         await human_delay()
 
         await fill_birthday(page, birthday)
         await human_delay()
 
-        email_selectors = [
+        await try_fill([
             "input[name='email']",
             "input[type='email']",
             "#signup-email",
             "[data-a-target='signup-email-input'] input",
             "input[aria-label='Email']",
-        ]
-        for sel in email_selectors:
-            el = page.locator(sel).first
-            if await el.count() > 0 and await el.is_visible():
-                await human_type(page, sel, email)
-                break
+        ], email, "email")
         await human_delay(1.0, 2.0)
 
+        signup_clicked = False
         signup_btn_selectors = [
             "button[data-a-target='passport-signup-button']",
             "button[data-a-target='signup-button']",
@@ -232,7 +231,12 @@ async def register_one(
             btn = page.locator(sel).first
             if await btn.count() > 0 and await btn.is_visible():
                 await btn.click()
+                signup_clicked = True
                 break
+        if not signup_clicked:
+            logger.error(f"{tag} Could not find signup button")
+            await page.screenshot(path=f"debug_signup_{task_id}.png")
+            return None
         logger.info(f"{tag} Signup form submitted, waiting for verification")
 
         await asyncio.sleep(5)
@@ -344,6 +348,11 @@ async def register_one(
 
     except Exception as e:
         logger.error(f"{tag} Registration failed: {e}")
+        try:
+            if page:
+                await page.screenshot(path=f"debug_error_{task_id}.png")
+        except Exception:
+            pass
         return None
     finally:
         if browser:

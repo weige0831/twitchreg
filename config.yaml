@@ -3,12 +3,13 @@ twitch:
   signup_url: "https://www.twitch.tv/signup"
 
 worker:
-  concurrency: 3
+  concurrency: 1
   total_count: 0
   worker_name: "reg_worker"
 
 tempmail:
   base_url: "https://mail.minecraft-cn.net"
+  mail_domain: "olsbvgq.shop"
   poll_interval: 5
   poll_timeout: 120
 

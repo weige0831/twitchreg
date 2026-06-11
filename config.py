@@ -21,6 +21,7 @@ def load_config(path: str = None) -> dict:
         },
         "tempmail": {
             "base_url": "https://mail.minecraft-cn.net",
+            "mail_domain": "olsbvgq.shop",
             "poll_interval": 5,
             "poll_timeout": 120,
         },

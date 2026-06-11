@@ -6,14 +6,18 @@ from loguru import logger
 
 class TempMailClient:
 
-    def __init__(self, base_url: str, poll_interval: int = 5, poll_timeout: int = 120):
+    def __init__(self, base_url: str, mail_domain: str = "", poll_interval: int = 5, poll_timeout: int = 120):
         self.base_url = base_url.rstrip("/")
+        self.mail_domain = mail_domain
         self.poll_interval = poll_interval
         self.poll_timeout = poll_timeout
         self._client = httpx.AsyncClient(timeout=30)
 
     async def create_address(self) -> dict:
-        resp = await self._client.post(f"{self.base_url}/api/v1/addresses")
+        payload = {}
+        if self.mail_domain:
+            payload["domain"] = self.mail_domain
+        resp = await self._client.post(f"{self.base_url}/api/v1/addresses", json=payload if payload else None)
         resp.raise_for_status()
         data = resp.json()
         logger.info(f"Created temp email: {data['email']}")

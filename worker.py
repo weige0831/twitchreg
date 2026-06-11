@@ -20,6 +20,7 @@ class WorkerPool:
         self.running = True
         self.mail_client = TempMailClient(
             base_url=cfg["tempmail"]["base_url"],
+            mail_domain=cfg["tempmail"].get("mail_domain", ""),
             poll_interval=cfg["tempmail"]["poll_interval"],
             poll_timeout=cfg["tempmail"]["poll_timeout"],
         )
