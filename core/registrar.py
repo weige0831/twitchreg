@@ -24,20 +24,6 @@ async def human_delay(lo: float = 0.5, hi: float = 1.5):
     await asyncio.sleep(random.uniform(lo, hi))
 
 
-async def _upload_smms(client: httpx.AsyncClient, path: str) -> str:
-    with open(path, "rb") as f:
-        resp = await client.post(
-            "https://sm.ms/api/v2/upload",
-            files={"smfile": ("screenshot.png", f, "image/png")},
-        )
-    data = resp.json()
-    if data.get("success"):
-        return data["data"]["url"]
-    if data.get("code") == "image_repeated":
-        return data.get("images", "")
-    raise Exception(f"sm.ms {resp.status_code}: {data.get('message', resp.text[:200])}")
-
-
 async def _upload_github(client: httpx.AsyncClient, path: str) -> str:
     import base64 as b64mod
     import os
@@ -84,7 +70,6 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
         return ""
 
     upload_services = [
-        _upload_smms,
         _upload_github,
     ]
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
