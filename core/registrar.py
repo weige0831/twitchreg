@@ -24,30 +24,33 @@ async def human_delay(lo: float = 0.5, hi: float = 1.5):
     await asyncio.sleep(random.uniform(lo, hi))
 
 
-async def _upload_gofile(client: httpx.AsyncClient, path: str) -> str:
-    srv_resp = await client.get("https://api.gofile.io/servers")
-    srv_data = srv_resp.json()
-    server = srv_data["data"]["servers"][0]["name"]
+async def _upload_telegraph(client: httpx.AsyncClient, path: str) -> str:
     with open(path, "rb") as f:
         resp = await client.post(
-            f"https://{server}.gofile.io/contents",
+            "https://telegra.ph/upload",
             files={"file": ("screenshot.png", f, "image/png")},
         )
         data = resp.json()
-        if data.get("status") == "ok":
-            return data["data"]["downloadPage"]
+        if isinstance(data, list) and data and "src" in data[0]:
+            return f"https://telegra.ph{data[0]['src']}"
     return ""
 
 
-async def _upload_fileio(client: httpx.AsyncClient, path: str) -> str:
+async def _upload_freeimage(client: httpx.AsyncClient, path: str) -> str:
+    import base64
     with open(path, "rb") as f:
-        resp = await client.post(
-            "https://file.io",
-            files={"file": ("screenshot.png", f, "image/png")},
-        )
-        data = resp.json()
-        if data.get("success"):
-            return data["link"]
+        b64 = base64.b64encode(f.read()).decode()
+    resp = await client.post(
+        "https://freeimage.host/api/1/upload",
+        data={
+            "key": "6d207e02198a847aa98d0a2a901485a",
+            "source": b64,
+            "format": "json",
+        },
+    )
+    data = resp.json()
+    if data.get("status_code") == 200:
+        return data["image"]["url"]
     return ""
 
 
@@ -60,8 +63,8 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
         return ""
 
     upload_services = [
-        _upload_gofile,
-        _upload_fileio,
+        _upload_telegraph,
+        _upload_freeimage,
     ]
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         for upload_fn in upload_services:
