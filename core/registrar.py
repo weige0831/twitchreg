@@ -37,7 +37,7 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
          {"reqtype": "fileupload"}, "fileToUpload"),
         ("0x0.st", "https://0x0.st", {}, "file"),
     ]
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+    async with httpx.AsyncClient(timeout=5, follow_redirects=True) as client:
         for svc_name, url, data, file_key in upload_targets:
             try:
                 with open(path, "rb") as f:
@@ -261,9 +261,13 @@ async def register_one(
                 await take_screenshot(page, "step5_no_signup", task_id)
                 return None
 
+            await asyncio.sleep(3)
+            logger.info(f"{tag} Page URL after submit: {page.url}")
+            page_title = await page.title()
+            logger.info(f"{tag} Page title: {page_title}")
             await take_screenshot(page, "step5_submitted", task_id)
-            logger.info(f"{tag} Signup submitted, waiting for verification email...")
-            await asyncio.sleep(5)
+
+            await asyncio.sleep(3)
 
             error_el = await find_visible(page, [
                 "text='Your browser is not currently supported'",
@@ -277,6 +281,18 @@ async def register_one(
                 logger.error(f"{tag} Registration error: {err_text}")
                 await take_screenshot(page, "step5_error", task_id)
                 return None
+
+            captcha_el = await find_visible(page, [
+                "iframe[src*='captcha']",
+                "iframe[src*='arkose']",
+                "iframe[src*='funcaptcha']",
+                "iframe[title*='arkose']",
+                "[id*='captcha']",
+                "[class*='captcha']",
+            ], timeout=2000)
+            if captcha_el:
+                logger.warning(f"{tag} Captcha/challenge detected after submit")
+                await take_screenshot(page, "step5_captcha", task_id)
 
             logger.info(f"{tag} Step 6: Waiting for verification code")
             try:
