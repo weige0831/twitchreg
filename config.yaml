@@ -1,0 +1,21 @@
+twitch:
+  client_id: "kimne78kx3ncx6brgo4mv6wki5h1ko"
+  signup_url: "https://www.twitch.tv/signup"
+
+worker:
+  concurrency: 3
+  total_count: 0
+  worker_name: "reg_worker"
+
+tempmail:
+  base_url: "https://mail.minecraft-cn.net"
+  poll_interval: 5
+  poll_timeout: 120
+
+cdk_api:
+  base_url: ""
+  api_token: "twitch-cdk-api-token-2024"
+
+browser:
+  headless: true
+  timeout: 30000
