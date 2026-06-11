@@ -2,7 +2,17 @@ import asyncio
 import random
 import re
 from playwright.async_api import async_playwright, Page, BrowserContext
-from playwright_stealth import stealth_async
+_STEALTH_V2 = False
+try:
+    from playwright_stealth import Stealth
+    _stealth_instance = Stealth()
+    _STEALTH_V2 = True
+except ImportError:
+    pass
+try:
+    from playwright_stealth import stealth_async as _stealth_async_v1
+except ImportError:
+    _stealth_async_v1 = None
 from loguru import logger
 
 from .email_client import TempMailClient
@@ -155,8 +165,11 @@ async def register_one(
             locale="en-US",
             timezone_id="America/New_York",
         )
+        if _STEALTH_V2:
+            await _stealth_instance.apply_stealth_async(context)
         page = await context.new_page()
-        await stealth_async(page)
+        if not _STEALTH_V2 and _stealth_async_v1:
+            await _stealth_async_v1(page)
 
         logger.info(f"{tag} Navigating to signup page")
         await page.goto(SIGNUP_URL, wait_until="networkidle", timeout=cfg["browser"]["timeout"])
