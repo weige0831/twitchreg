@@ -38,19 +38,33 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
     path = f"debug_{name}_{task_id}.png"
     try:
         await page.screenshot(path=path)
-        async with httpx.AsyncClient(timeout=30) as client:
-            with open(path, "rb") as f:
-                resp = await client.post(
-                    "https://0x0.st",
-                    files={"file": ("screenshot.png", f, "image/png")},
-                )
-                if resp.status_code == 200:
-                    url = resp.text.strip()
-                    logger.info(f"[Task-{task_id}] Screenshot ({name}): {url}")
-                    return url
     except Exception as e:
-        logger.debug(f"[Task-{task_id}] Screenshot upload failed: {e}")
-    logger.info(f"[Task-{task_id}] Screenshot saved: {path}")
+        logger.debug(f"[Task-{task_id}] Screenshot capture failed: {e}")
+        return ""
+
+    upload_targets = [
+        ("catbox.moe", "https://catbox.moe/user/api.php",
+         {"reqtype": "fileupload"}, "fileToUpload"),
+        ("0x0.st", "https://0x0.st", {}, "file"),
+    ]
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        for svc_name, url, data, file_key in upload_targets:
+            try:
+                with open(path, "rb") as f:
+                    resp = await client.post(
+                        url,
+                        data=data,
+                        files={file_key: ("screenshot.png", f, "image/png")},
+                    )
+                    if resp.status_code == 200:
+                        link = resp.text.strip()
+                        logger.info(f"[Task-{task_id}] Screenshot ({name}): {link}")
+                        return link
+            except Exception:
+                continue
+
+    logger.warning(f"[Task-{task_id}] Screenshot upload failed, saved locally: {path}")
+    logger.warning(f"[Task-{task_id}] -> Download from Actions tab -> Artifacts -> debug-screenshots")
     return path
 
 
