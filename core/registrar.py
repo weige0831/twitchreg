@@ -22,95 +22,33 @@ from .generator import random_username, random_password, random_birthday
 SIGNUP_URL = "https://www.twitch.tv/signup"
 
 
-async def human_type(page: Page, selector: str, text: str):
-    el = page.locator(selector).first
-    await el.click()
+async def human_type(page: Page, locator, text: str):
+    await locator.click()
     for ch in text:
-        await el.press(ch if len(ch) == 1 else ch)
-        await asyncio.sleep(random.uniform(0.04, 0.12))
+        await locator.press(ch)
+        await asyncio.sleep(random.uniform(0.03, 0.10))
 
 
 async def human_delay(lo: float = 0.5, hi: float = 1.5):
     await asyncio.sleep(random.uniform(lo, hi))
 
 
-async def select_dropdown(page: Page, trigger_sel: str, value: str):
-    trigger = page.locator(trigger_sel).first
-    await trigger.scroll_into_view_if_needed()
-    await trigger.click()
-    await asyncio.sleep(0.3)
-
-    option = page.locator(f"[data-value='{value}']").first
-    if await option.count() == 0:
-        option = page.get_by_text(value, exact=True).first
-    await option.click()
-    await human_delay(0.2, 0.5)
-
-
-async def fill_birthday(page: Page, birthday: dict):
-    month_names = [
-        "", "January", "February", "March", "April", "May", "June",
-        "July", "August", "September", "October", "November", "December",
-    ]
-
-    month_sel = (
-        "[data-a-target='birthday-month-select'] select,"
-        "[data-a-target='birthday-date-select-month'],"
-        "select#month,"
-        "select[aria-label='Month']"
-    )
-    day_sel = (
-        "[data-a-target='birthday-day-select'] select,"
-        "[data-a-target='birthday-date-select-day'],"
-        "select#day,"
-        "select[aria-label='Day']"
-    )
-    year_sel = (
-        "[data-a-target='birthday-year-select'] select,"
-        "[data-a-target='birthday-date-select-year'],"
-        "select#year,"
-        "select[aria-label='Year']"
-    )
-
-    for sel, val in [
-        (month_sel, str(birthday["month"])),
-        (day_sel, str(birthday["day"])),
-        (year_sel, str(birthday["year"])),
-    ]:
-        el = page.locator(sel).first
+async def find_visible(page: Page, selectors: list[str], timeout: int = 5000):
+    for sel in selectors:
         try:
-            tag = await el.evaluate("e => e.tagName.toLowerCase()")
+            el = page.locator(sel).first
+            await el.wait_for(state="visible", timeout=timeout)
+            return el
         except Exception:
-            tag = ""
-
-        if tag == "select":
-            await el.select_option(val)
-        else:
-            await el.click()
-            await asyncio.sleep(0.3)
-            if sel.startswith("[data-a-target='birthday-month"):
-                display = month_names[int(val)]
-            else:
-                display = val
-            opt = page.get_by_text(display, exact=True).first
-            await opt.click()
-
-        await human_delay(0.3, 0.6)
+            continue
+    return None
 
 
-async def switch_to_email_tab(page: Page):
-    email_tab_selectors = [
-        "button[data-a-target='passport-tab-email']",
-        "button:has-text('Email')",
-        "a:has-text('Use email instead')",
-        "[data-a-target='signup-email-tab']",
-    ]
-    for sel in email_tab_selectors:
-        el = page.locator(sel).first
-        if await el.count() > 0 and await el.is_visible():
-            await el.click()
-            await human_delay(0.5, 1.0)
-            return True
+async def click_button(page: Page, selectors: list[str], timeout: int = 5000) -> bool:
+    el = await find_visible(page, selectors, timeout)
+    if el:
+        await el.click()
+        return True
     return False
 
 
@@ -174,140 +112,185 @@ async def register_one(
 
         logger.info(f"{tag} Navigating to signup page")
         await page.goto(SIGNUP_URL, wait_until="domcontentloaded", timeout=cfg["browser"]["timeout"])
-        await human_delay(2.0, 4.0)
+        await human_delay(3.0, 5.0)
 
-        await page.wait_for_load_state("load", timeout=15000)
+        await page.screenshot(path=f"debug_step0_loaded_{task_id}.png")
 
-        await switch_to_email_tab(page)
+        email_input = await find_visible(page, [
+            "#email-input",
+            "input[type='email']",
+            "input[name='email']",
+            "[data-a-target='signup-email-input'] input",
+            "input[aria-label='Email']",
+            "form input:first-of-type",
+        ], timeout=10000)
 
-        async def try_fill(selectors, value, field_name):
-            for sel in selectors:
-                el = page.locator(sel).first
-                if await el.count() > 0 and await el.is_visible():
-                    await human_type(page, sel, value)
-                    logger.debug(f"{tag} Filled {field_name} via {sel}")
-                    return True
-            logger.warning(f"{tag} Could not find {field_name} input")
-            return False
+        if email_input:
+            logger.info(f"{tag} Step 1: Filling email")
+            await human_type(page, email_input, email)
+            await human_delay(0.5, 1.0)
 
-        await try_fill([
+            await click_button(page, [
+                "button:has-text('Continue')",
+                "button:has-text('Next')",
+                "button:has-text('Next Step')",
+                "form button[type='submit']",
+                "form button",
+            ])
+            await human_delay(2.0, 3.0)
+        else:
+            logger.info(f"{tag} No email-first flow detected, trying classic layout")
+            await page.screenshot(path=f"debug_step1_no_email_{task_id}.png")
+
+        logger.info(f"{tag} Step 2: Filling username")
+        username_input = await find_visible(page, [
             "#signup-username",
             "input[name='username']",
             "input[autocomplete='username']",
-            "[data-a-target='signup-username-input'] input",
             "input[aria-label='Username']",
-        ], username, "username")
-        await human_delay()
+            "[data-a-target='signup-username-input'] input",
+        ], timeout=10000)
+        if username_input:
+            await human_type(page, username_input, username)
+            await human_delay()
+        else:
+            logger.error(f"{tag} Could not find username input")
+            await page.screenshot(path=f"debug_step2_no_username_{task_id}.png")
+            return None
 
-        await try_fill([
+        logger.info(f"{tag} Step 3: Filling password")
+        password_input = await find_visible(page, [
+            "#password-input",
             "#signup-password",
+            "input[type='password']",
             "input[name='password']",
             "input[autocomplete='new-password']",
-            "[data-a-target='signup-password-input'] input",
             "input[aria-label='Password']",
-        ], password, "password")
-        await human_delay()
+        ])
+        if password_input:
+            await human_type(page, password_input, password)
+            await human_delay()
+        else:
+            logger.error(f"{tag} Could not find password input")
+            await page.screenshot(path=f"debug_step3_no_password_{task_id}.png")
+            return None
 
-        await fill_birthday(page, birthday)
-        await human_delay()
+        logger.info(f"{tag} Step 4: Filling birthday")
+        month_names = {
+            1: "January", 2: "February", 3: "March", 4: "April",
+            5: "May", 6: "June", 7: "July", 8: "August",
+            9: "September", 10: "October", 11: "November", 12: "December",
+        }
+        selects = page.locator("form select")
+        select_count = await selects.count()
+        if select_count >= 3:
+            await selects.nth(0).select_option(label=month_names[birthday["month"]])
+            await human_delay(0.3, 0.5)
+            await selects.nth(1).select_option(str(birthday["day"]))
+            await human_delay(0.3, 0.5)
+            await selects.nth(2).select_option(str(birthday["year"]))
+            await human_delay(0.5, 1.0)
+        else:
+            logger.warning(f"{tag} Found {select_count} select elements, trying text-based birthday")
+            month_btn = await find_visible(page, [
+                "button:has-text('Month')",
+                "[data-a-target='birthday-month-select']",
+            ])
+            if month_btn:
+                await month_btn.click()
+                await human_delay(0.3, 0.5)
+                await page.get_by_text(month_names[birthday["month"]], exact=True).first.click()
+                await human_delay(0.3, 0.5)
 
-        await try_fill([
-            "input[name='email']",
-            "input[type='email']",
-            "#signup-email",
-            "[data-a-target='signup-email-input'] input",
-            "input[aria-label='Email']",
-        ], email, "email")
+            day_btn = await find_visible(page, [
+                "button:has-text('Day')",
+                "[data-a-target='birthday-day-select']",
+            ])
+            if day_btn:
+                await day_btn.click()
+                await human_delay(0.3, 0.5)
+                await page.get_by_text(str(birthday["day"]), exact=True).first.click()
+                await human_delay(0.3, 0.5)
+
+            year_btn = await find_visible(page, [
+                "button:has-text('Year')",
+                "[data-a-target='birthday-year-select']",
+            ])
+            if year_btn:
+                await year_btn.click()
+                await human_delay(0.3, 0.5)
+                await page.get_by_text(str(birthday["year"]), exact=True).first.click()
+
         await human_delay(1.0, 2.0)
 
-        signup_clicked = False
-        signup_btn_selectors = [
+        logger.info(f"{tag} Step 5: Clicking Sign Up")
+        signup_clicked = await click_button(page, [
             "button[data-a-target='passport-signup-button']",
-            "button[data-a-target='signup-button']",
             "button:has-text('Sign Up')",
             "button:has-text('Join Twitch')",
-        ]
-        for sel in signup_btn_selectors:
-            btn = page.locator(sel).first
-            if await btn.count() > 0 and await btn.is_visible():
-                await btn.click()
-                signup_clicked = True
-                break
+            "form button[type='submit']",
+        ])
         if not signup_clicked:
             logger.error(f"{tag} Could not find signup button")
-            await page.screenshot(path=f"debug_signup_{task_id}.png")
+            await page.screenshot(path=f"debug_step5_no_signup_{task_id}.png")
             return None
-        logger.info(f"{tag} Signup form submitted, waiting for verification")
 
+        await page.screenshot(path=f"debug_step5_submitted_{task_id}.png")
+        logger.info(f"{tag} Signup submitted, waiting for verification email...")
         await asyncio.sleep(5)
 
-        current_url = page.url
-        page_content = await page.content()
-
         has_error = False
-        error_selectors = [
+        error_el = await find_visible(page, [
             "[data-a-target='signup-error']",
             ".server-message-alert",
             "[class*='error-message']",
-        ]
-        for sel in error_selectors:
-            el = page.locator(sel).first
-            if await el.count() > 0 and await el.is_visible():
-                err_text = await el.text_content()
-                logger.error(f"{tag} Registration error: {err_text}")
-                has_error = True
-                break
+            "[class*='ErrorMessage']",
+        ], timeout=3000)
+        if error_el:
+            err_text = await error_el.text_content()
+            logger.error(f"{tag} Registration error: {err_text}")
+            has_error = True
 
         if has_error:
+            await page.screenshot(path=f"debug_step5_error_{task_id}.png")
             return None
 
-        logger.info(f"{tag} Waiting for verification code email...")
+        logger.info(f"{tag} Step 6: Waiting for verification code")
         code = await mail_client.wait_for_verification_code(mail_token)
 
-        code_input_selectors = [
+        otp_input = await find_visible(page, [
             "input[name='code']",
             "input[aria-label*='erification']",
             "input[aria-label*='code']",
-            "[data-a-target='verification-code-input'] input",
             "input[placeholder*='code']",
             "input[maxlength='6']",
-        ]
-        code_entered = False
-        for sel in code_input_selectors:
-            el = page.locator(sel).first
-            if await el.count() > 0 and await el.is_visible():
-                await human_type(page, sel, code)
-                code_entered = True
-                break
+            "[data-a-target='verification-code-input'] input",
+        ], timeout=10000)
 
-        if not code_entered:
-            for digit_idx in range(6):
-                digit_input = page.locator(f"input[data-index='{digit_idx}']").first
-                if await digit_input.count() > 0:
-                    await digit_input.fill(code[digit_idx])
-                    await asyncio.sleep(0.1)
-                    code_entered = True
+        if otp_input:
+            await human_type(page, otp_input, code)
+            await human_delay(1.0, 2.0)
 
-        if code_entered:
-            submit_selectors = [
+            await click_button(page, [
                 "button[data-a-target='passport-verify-button']",
                 "button:has-text('Submit')",
                 "button:has-text('Verify')",
                 "button[type='submit']",
-            ]
-            for sel in submit_selectors:
-                btn = page.locator(sel).first
-                if await btn.count() > 0 and await btn.is_visible():
-                    await btn.click()
-                    break
+            ])
             await asyncio.sleep(5)
+        else:
+            logger.warning(f"{tag} Could not find OTP input, trying digit inputs")
+            for i in range(6):
+                digit = page.locator(f"input[data-index='{i}']").first
+                if await digit.count() > 0:
+                    await digit.fill(code[i])
+                    await asyncio.sleep(0.1)
 
-        logger.info(f"{tag} Extracting cookies...")
+        logger.info(f"{tag} Step 7: Extracting cookies")
         cookie_list, auth_token = await extract_cookies(context)
 
         if not auth_token:
-            all_cookies = await context.cookies()
-            for c in all_cookies:
+            for c in await context.cookies():
                 if "auth" in c["name"].lower() and "token" in c["name"].lower():
                     auth_token = c["value"]
                     break
@@ -321,7 +304,8 @@ async def register_one(
                 pass
 
         if not auth_token:
-            logger.warning(f"{tag} Could not find auth_token in cookies, registration may have failed")
+            logger.warning(f"{tag} No auth_token found")
+            await page.screenshot(path=f"debug_step7_no_token_{task_id}.png")
 
         result = {
             "username": username,
@@ -343,7 +327,10 @@ async def register_one(
             except Exception as e:
                 logger.error(f"{tag} Failed to upload to CDK system: {e}")
 
-        logger.success(f"{tag} Registration complete: {username} | auth_token={auth_token[:20]}..." if auth_token else f"{tag} Registration complete: {username} | no auth_token")
+        if auth_token:
+            logger.success(f"{tag} Done: {username} | token={auth_token[:20]}...")
+        else:
+            logger.warning(f"{tag} Done: {username} | no auth_token")
         return result
 
     except Exception as e:

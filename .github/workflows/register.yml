@@ -17,6 +17,11 @@ on:
         required: true
         default: "1"
         type: string
+      count_per_job:
+        description: "每个Job注册数量 (0=无限)"
+        required: true
+        default: "10"
+        type: string
       job_count:
         description: "启动的Job数量"
         required: true
@@ -58,7 +63,7 @@ jobs:
             --api-url "${{ inputs.cdk_api_url }}" \
             --mail-domain "${{ inputs.mail_domain }}" \
             -w ${{ inputs.concurrency }} \
-            -n 0
+            -n ${{ inputs.count_per_job }}
 
       - name: Upload debug screenshots
         if: always()
