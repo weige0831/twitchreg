@@ -30,10 +30,13 @@ async def _upload_telegraph(client: httpx.AsyncClient, path: str) -> str:
             "https://telegra.ph/upload",
             files={"file": ("screenshot.png", f, "image/png")},
         )
+        logger.debug(f"telegra.ph response [{resp.status_code}]: {resp.text[:200]}")
+        if resp.status_code != 200:
+            raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
         data = resp.json()
         if isinstance(data, list) and data and "src" in data[0]:
             return f"https://telegra.ph{data[0]['src']}"
-    return ""
+        raise Exception(f"Unexpected response: {resp.text[:200]}")
 
 
 async def _upload_freeimage(client: httpx.AsyncClient, path: str) -> str:
@@ -48,10 +51,13 @@ async def _upload_freeimage(client: httpx.AsyncClient, path: str) -> str:
             "format": "json",
         },
     )
+    logger.debug(f"freeimage response [{resp.status_code}]: {resp.text[:200]}")
+    if resp.status_code != 200:
+        raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
     if data.get("status_code") == 200:
         return data["image"]["url"]
-    return ""
+    raise Exception(f"Unexpected response: {resp.text[:200]}")
 
 
 async def take_screenshot(page: Page, name: str, task_id: int) -> str:
