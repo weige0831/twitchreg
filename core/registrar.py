@@ -47,7 +47,7 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
                     logger.info(f"[Task-{task_id}] Screenshot ({name}): {link}")
                     return link
     except Exception as e:
-        logger.debug(f"[Task-{task_id}] gofile upload error: {e}")
+        logger.error(f"[Task-{task_id}] gofile upload error: {type(e).__name__}: {e}")
 
     logger.warning(f"[Task-{task_id}] Screenshot upload failed, saved locally: {path}")
     logger.warning(f"[Task-{task_id}] -> Download from Actions tab -> Artifacts -> debug-screenshots")
