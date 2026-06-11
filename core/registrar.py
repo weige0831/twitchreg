@@ -24,40 +24,55 @@ async def human_delay(lo: float = 0.5, hi: float = 1.5):
     await asyncio.sleep(random.uniform(lo, hi))
 
 
-async def _upload_telegraph(client: httpx.AsyncClient, path: str) -> str:
+async def _upload_smms(client: httpx.AsyncClient, path: str) -> str:
     with open(path, "rb") as f:
         resp = await client.post(
-            "https://telegra.ph/upload",
-            files={"file": ("screenshot.png", f, "image/png")},
+            "https://sm.ms/api/v2/upload",
+            files={"smfile": ("screenshot.png", f, "image/png")},
         )
-        logger.debug(f"telegra.ph response [{resp.status_code}]: {resp.text[:200]}")
-        if resp.status_code != 200:
-            raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
-        data = resp.json()
-        if isinstance(data, list) and data and "src" in data[0]:
-            return f"https://telegra.ph{data[0]['src']}"
-        raise Exception(f"Unexpected response: {resp.text[:200]}")
-
-
-async def _upload_freeimage(client: httpx.AsyncClient, path: str) -> str:
-    import base64
-    with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
-    resp = await client.post(
-        "https://freeimage.host/api/1/upload",
-        data={
-            "key": "6d207e02198a847aa98d0a2a901485a",
-            "source": b64,
-            "format": "json",
-        },
-    )
-    logger.debug(f"freeimage response [{resp.status_code}]: {resp.text[:200]}")
-    if resp.status_code != 200:
-        raise Exception(f"HTTP {resp.status_code}: {resp.text[:200]}")
     data = resp.json()
-    if data.get("status_code") == 200:
-        return data["image"]["url"]
-    raise Exception(f"Unexpected response: {resp.text[:200]}")
+    if data.get("success"):
+        return data["data"]["url"]
+    if data.get("code") == "image_repeated":
+        return data.get("images", "")
+    raise Exception(f"sm.ms {resp.status_code}: {data.get('message', resp.text[:200])}")
+
+
+async def _upload_github(client: httpx.AsyncClient, path: str) -> str:
+    import base64 as b64mod
+    import os
+    token = os.environ.get("GITHUB_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    run_id = os.environ.get("GITHUB_RUN_ID", "0")
+    if not token or not repo:
+        raise Exception("GITHUB_TOKEN/GITHUB_REPOSITORY not set")
+
+    filename = os.path.basename(path)
+    with open(path, "rb") as f:
+        content = b64mod.b64encode(f.read()).decode()
+
+    gh_headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+
+    branch = "debug-screenshots"
+    check = await client.get(f"https://api.github.com/repos/{repo}/branches/{branch}", headers=gh_headers)
+    if check.status_code == 404:
+        ref = await client.get(f"https://api.github.com/repos/{repo}/git/ref/heads/main", headers=gh_headers)
+        sha = ref.json()["object"]["sha"]
+        await client.post(
+            f"https://api.github.com/repos/{repo}/git/refs",
+            headers=gh_headers,
+            json={"ref": f"refs/heads/{branch}", "sha": sha},
+        )
+
+    file_path = f"{run_id}/{filename}"
+    resp = await client.put(
+        f"https://api.github.com/repos/{repo}/contents/{file_path}",
+        headers=gh_headers,
+        json={"message": f"debug: {filename}", "content": content, "branch": branch},
+    )
+    if resp.status_code in (200, 201):
+        return f"https://raw.githubusercontent.com/{repo}/{branch}/{file_path}"
+    raise Exception(f"GitHub API {resp.status_code}: {resp.text[:200]}")
 
 
 async def take_screenshot(page: Page, name: str, task_id: int) -> str:
@@ -69,8 +84,8 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
         return ""
 
     upload_services = [
-        _upload_telegraph,
-        _upload_freeimage,
+        _upload_smms,
+        _upload_github,
     ]
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
         for upload_fn in upload_services:
