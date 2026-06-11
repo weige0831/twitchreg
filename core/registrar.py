@@ -24,6 +24,33 @@ async def human_delay(lo: float = 0.5, hi: float = 1.5):
     await asyncio.sleep(random.uniform(lo, hi))
 
 
+async def _upload_gofile(client: httpx.AsyncClient, path: str) -> str:
+    srv_resp = await client.get("https://api.gofile.io/servers")
+    srv_data = srv_resp.json()
+    server = srv_data["data"]["servers"][0]["name"]
+    with open(path, "rb") as f:
+        resp = await client.post(
+            f"https://{server}.gofile.io/contents",
+            files={"file": ("screenshot.png", f, "image/png")},
+        )
+        data = resp.json()
+        if data.get("status") == "ok":
+            return data["data"]["downloadPage"]
+    return ""
+
+
+async def _upload_fileio(client: httpx.AsyncClient, path: str) -> str:
+    with open(path, "rb") as f:
+        resp = await client.post(
+            "https://file.io",
+            files={"file": ("screenshot.png", f, "image/png")},
+        )
+        data = resp.json()
+        if data.get("success"):
+            return data["link"]
+    return ""
+
+
 async def take_screenshot(page: Page, name: str, task_id: int) -> str:
     path = f"debug_{name}_{task_id}.png"
     try:
@@ -32,22 +59,19 @@ async def take_screenshot(page: Page, name: str, task_id: int) -> str:
         logger.debug(f"[Task-{task_id}] Screenshot capture failed: {e}")
         return ""
 
-    try:
-        async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-            srv_resp = await client.get("https://api.gofile.io/servers")
-            server = srv_resp.json()["data"]["servers"][0]["name"]
-            with open(path, "rb") as f:
-                up_resp = await client.post(
-                    f"https://{server}.gofile.io/contents",
-                    files={"file": ("screenshot.png", f, "image/png")},
-                )
-                data = up_resp.json()
-                if data.get("status") == "ok":
-                    link = data["data"]["downloadPage"]
+    upload_services = [
+        _upload_gofile,
+        _upload_fileio,
+    ]
+    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
+        for upload_fn in upload_services:
+            try:
+                link = await upload_fn(client, path)
+                if link:
                     logger.info(f"[Task-{task_id}] Screenshot ({name}): {link}")
                     return link
-    except Exception as e:
-        logger.error(f"[Task-{task_id}] gofile upload error: {type(e).__name__}: {e}")
+            except Exception as e:
+                logger.warning(f"[Task-{task_id}] {upload_fn.__name__} failed: {e}")
 
     logger.warning(f"[Task-{task_id}] Screenshot upload failed, saved locally: {path}")
     logger.warning(f"[Task-{task_id}] -> Download from Actions tab -> Artifacts -> debug-screenshots")
