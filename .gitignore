@@ -10,3 +10,5 @@ venv/
 .venv/
 *.pyo
 *.pyd
+screenshots/
+debug_*.png
