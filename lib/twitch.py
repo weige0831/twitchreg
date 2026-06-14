@@ -24,8 +24,10 @@ def username_taken(username, proxy=None, timeout=15):
 
 
 class TwitchRegistrator:
-    """Drives the registration through the browser session (Kasada-protected)
-    while keeping username-check pure-protocol."""
+    """Drives registration through the browser session so Kasada's proof
+    headers cover every call. The payload now matches the live SPA exactly
+    (isOver18 camelCase, email_verification_enabled, no integrity_token — the
+    auth_passport_skip_integrity_on_signup flag is on)."""
 
     def __init__(self, browser, client_id=TWITCH_CLIENT_ID):
         self.browser = browser
@@ -36,15 +38,15 @@ class TwitchRegistrator:
         payload = {
             "username": username,
             "password": password,
-            "client_id": self.client_id,
+            "email": email,
             "birthday": {
                 "day": birthday["day"],
                 "month": birthday["month"],
                 "year": birthday["year"],
-                "is_over_18": True,
+                "isOver18": True,
             },
-            "email": email,
-            "integrity_token": self.browser.get_integrity(),
+            "email_verification_enabled": False,
+            "client_id": self.client_id,
             "is_password_guide": "nist",
         }
         if email_verification_code is not None:
