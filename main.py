@@ -59,7 +59,7 @@ def pick_username(proxy=None):
     return random_username()
 
 
-def register_one(browser, mail):
+def register_one(browser, mail, proxy=None):
     username = pick_username(proxy=proxy)
     password = random_password()
     birthday = random_birthday()
@@ -110,7 +110,7 @@ def main():
         for i in range(count):
             log(f"===== Account {i + 1}/{count} =====")
             try:
-                u, p, e, tok, uid = register_one(browser, mail)
+                u, p, e, tok, uid = register_one(browser, mail, proxy=proxy)
                 line = f"{u}:{p}:{e}:{uid}:{tok}"
                 save_account(line)
                 log(f"SUCCESS: {u} (uid={uid}) token={tok[:24]}...")
