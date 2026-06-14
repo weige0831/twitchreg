@@ -1,105 +1,73 @@
 import requests
 
 TWITCH_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko"
-PROTECTED_REGISTER_URL = "https://passport.twitch.tv/protected_register"
-USERNAME_CHECK_URL = "https://passport.twitch.tv/usernames/"
 
 
 class TwitchError(Exception):
-    def __init__(self, message, error_code=None, status_code=None):
+    def __init__(self, message, error_code=None):
         super().__init__(message)
         self.error_code = error_code
-        self.status_code = status_code
 
 
-class TwitchProtocol:
-    def __init__(self, user_agent, cookies, proxy=None, timeout=40):
-        self.session = requests.Session()
-        self.user_agent = user_agent
-        self.cookies = cookies or {}
-        self.timeout = timeout
-        if proxy:
-            self.session.proxies = {"http": proxy, "https": proxy}
-        self.session.headers.update({
-            "User-Agent": user_agent,
-            "Accept": "*/*",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Referer": "https://www.twitch.tv/",
-            "Origin": "https://www.twitch.tv",
-            "Sec-Fetch-Dest": "empty",
-            "Sec-Fetch-Mode": "cors",
-            "Sec-Fetch-Site": "same-site",
-        })
+def username_taken(username, proxy=None, timeout=15):
+    try:
+        r = requests.head(
+            f"https://passport.twitch.tv/usernames/{username}",
+            headers={"Connection": "close"},
+            timeout=timeout,
+            proxies={"http": proxy, "https": proxy} if proxy else None,
+            allow_redirects=False,
+        )
+        return r.status_code == 200
+    except Exception:
+        return False
 
-    def _cookie_header(self, extra=None):
-        merged = dict(self.cookies)
-        if extra:
-            merged.update(extra)
-        return "; ".join(f"{k}={v}" for k, v in merged.items())
 
-    def username_taken(self, username):
-        try:
-            resp = self.session.head(
-                USERNAME_CHECK_URL + username,
-                headers={"Connection": "close"},
-                timeout=self.timeout,
-                allow_redirects=False,
-            )
-            return resp.status_code == 200
-        except Exception:
-            return False
+class TwitchRegistrator:
+    """Drives the registration through the browser session (Kasada-protected)
+    while keeping username-check pure-protocol."""
 
-    def register(self, username, password, email, birthday, integrity_token, email_verification_code=None):
+    def __init__(self, browser, client_id=TWITCH_CLIENT_ID):
+        self.browser = browser
+        self.client_id = client_id
+
+    def register(self, username, password, email, birthday,
+                 email_verification_code=None):
         payload = {
             "username": username,
             "password": password,
-            "client_id": TWITCH_CLIENT_ID,
+            "client_id": self.client_id,
             "birthday": {
                 "day": birthday["day"],
                 "month": birthday["month"],
                 "year": birthday["year"],
+                "is_over_18": True,
             },
             "email": email,
-            "integrity_token": integrity_token,
+            "integrity_token": self.browser.get_integrity(),
             "is_password_guide": "nist",
         }
         if email_verification_code is not None:
             payload["email_verification_code"] = email_verification_code
 
-        headers = {
-            "Content-Type": "text/plain;charset=UTF-8",
-            "Cookie": self._cookie_header(),
-        }
-        import json as _json
-        resp = self.session.post(
-            PROTECTED_REGISTER_URL,
-            data=_json.dumps(payload),
-            headers=headers,
-            timeout=self.timeout,
-        )
-        try:
-            data = resp.json()
-        except Exception:
-            raise TwitchError(
-                f"Non-JSON register response (HTTP {resp.status_code}): {resp.text[:300]}",
-                status_code=resp.status_code,
-            )
+        result = self.browser.protected_register(payload)
+        status = result["status"]
+        data = result["data"]
 
-        if resp.status_code == 200 and "access_token" in data:
+        if status == 200 and "access_token" in data:
             return {
                 "success": True,
                 "access_token": data.get("access_token"),
                 "user_id": str(data.get("userID") or data.get("user_id") or ""),
             }
 
-        error_code = data.get("error_code") or data.get("ErrorCode")
+        error_code = data.get("error_code")
         error_msg = data.get("error") or data.get("Error") or "unknown"
         if error_code == 2026:
             return {"success": False, "need_verification": True}
         if error_code == 2013:
-            raise TwitchError(f"Email used too many times: {error_msg}", error_code=2013, status_code=resp.status_code)
+            raise TwitchError(f"Email used too many times: {error_msg}", error_code=2013)
         raise TwitchError(
-            f"Register failed [{error_code}]: {error_msg} | full: {str(data)[:300]}",
+            f"Register failed [{error_code}]: {error_msg} | {str(data)[:300]}",
             error_code=error_code,
-            status_code=resp.status_code,
         )

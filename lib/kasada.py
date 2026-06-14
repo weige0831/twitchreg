@@ -7,6 +7,12 @@ from playwright.sync_api import sync_playwright
 SIGNUP_URL = "https://www.twitch.tv/signup"
 TWITCH_URL = "https://www.twitch.tv"
 INTEGRITY_URL = "https://passport.twitch.tv/integrity"
+REGISTER_URL = "https://passport.twitch.tv/protected_register"
+
+UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+)
 
 INTEGRITY_JS = """
 async () => {
@@ -19,18 +25,37 @@ async () => {
         });
         const text = await resp.text();
         let data = {};
-        try { data = JSON.parse(text); } catch (e) { data = { _raw: text }; }
-        return { ok: resp.ok, status: resp.status, token: data.token || null, raw: text.slice(0, 500) };
+        try { data = JSON.parse(text); } catch (e) {}
+        return { status: resp.status, token: data.token || null, raw: text.slice(0, 400) };
     } catch (e) {
-        return { ok: false, status: 0, token: null, raw: String(e) };
+        return { status: 0, token: null, raw: String(e) };
     }
 }
 """ % INTEGRITY_URL
 
+REGISTER_JS = """
+async (body) => {
+    try {
+        const resp = await fetch("%s", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "text/plain;charset=UTF-8" },
+            body: body,
+        });
+        const text = await resp.text();
+        return { status: resp.status, body: text.slice(0, 1000) };
+    } catch (e) {
+        return { status: 0, body: String(e) };
+    }
+}
+""" % REGISTER_URL
 
-class KasadaHarvester:
-    """Harvest Twitch integrity tokens using a headless browser so the Kasada
-    anti-bot script runs naturally. The registration itself stays pure-protocol."""
+
+class BrowserSession:
+    """Manages a headless browser that runs the Kasada anti-bot script
+    naturally. All Twitch API calls (integrity + protected_register) are made
+    through the page's own fetch(), so Kasada's injected proof headers are
+    applied automatically. Email handling stays pure-protocol."""
 
     def __init__(self, headless=True, proxy=None, page_timeout=60000):
         self.headless = headless
@@ -47,84 +72,79 @@ class KasadaHarvester:
             "--no-sandbox",
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
-            "--disable-features=IsolateOrigins,site-per-process",
         ]
         launch_kwargs = {"headless": self.headless, "args": launch_args}
         if self.proxy:
             launch_kwargs["proxy"] = {"server": self.proxy}
         self._browser = self._pw.chromium.launch(**launch_kwargs)
         self._context = self._browser.new_context(
-            viewport={"width": 1280, "height": 800},
+            viewport={"width": 1366, "height": 850},
             locale="en-US",
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            ),
+            user_agent=UA,
         )
         self._context.add_init_script(
             "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
         )
         self._page = self._context.new_page()
         self._page.set_default_timeout(self.page_timeout)
-        url = SIGNUP_URL
         try:
-            self._page.goto(url, wait_until="domcontentloaded")
+            self._page.goto(SIGNUP_URL, wait_until="domcontentloaded")
         except Exception:
             self._page.goto(TWITCH_URL, wait_until="domcontentloaded")
         self._stabilize()
         return self
 
     def _stabilize(self):
-        for _ in range(40):
+        for _ in range(30):
             try:
-                ready = self._page.evaluate(
-                    "() => typeof window.fetch === 'function' && document.readyState"
-                )
-                if ready:
+                if self._page.evaluate("() => typeof window.fetch === 'function'"):
                     break
             except Exception:
                 pass
             time.sleep(0.5)
-        time.sleep(2)
+        time.sleep(3)
 
-    def harvest(self, retries=3, delay=2):
+    def get_integrity(self, retries=3, delay=2):
         last = None
         for _ in range(retries):
             try:
                 result = self._page.evaluate(INTEGRITY_JS)
             except Exception as e:
-                result = {"ok": False, "status": 0, "token": None, "raw": str(e)}
+                result = {"status": 0, "token": None, "raw": str(e)}
             last = result
             if result.get("token"):
-                cookies = {
-                    c["name"]: c["value"]
-                    for c in self._context.cookies("https://www.twitch.tv")
-                }
-                passport_cookies = {
-                    c["name"]: c["value"]
-                    for c in self._context.cookies("https://passport.twitch.tv")
-                }
-                cookies.update(passport_cookies)
-                ua = self._page.evaluate("() => navigator.userAgent")
-                return {
-                    "token": result["token"],
-                    "cookies": cookies,
-                    "user_agent": ua,
-                }
+                return result["token"]
             time.sleep(delay)
-        raise RuntimeError(
-            "Failed to harvest integrity token. Last response: %s"
-            % json.dumps(last)[:800]
-        )
+        raise RuntimeError("Integrity token harvest failed: %s" % json.dumps(last)[:500])
+
+    def get_cookies(self):
+        cookies = {}
+        for domain in ("https://www.twitch.tv", "https://passport.twitch.tv"):
+            for c in self._context.cookies(domain):
+                cookies[c["name"]] = c["value"]
+        return cookies
 
     def user_agent(self):
-        try:
-            return self._page.evaluate("() => navigator.userAgent")
-        except Exception:
-            return (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
+        return UA
+
+    def protected_register(self, payload, retries=2, delay=2):
+        import json as _json
+        body = _json.dumps(payload)
+        last = None
+        for _ in range(retries):
+            try:
+                result = self._page.evaluate(REGISTER_JS, body)
+            except Exception as e:
+                result = {"status": 0, "body": str(e)}
+            last = result
+            if result.get("status") and result["status"] > 0:
+                try:
+                    data = _json.loads(result["body"])
+                except Exception:
+                    data = {"_raw": result["body"]}
+                return {"status": result["status"], "data": data}
+            time.sleep(delay)
+        raise RuntimeError("protected_register failed: %s" % json.dumps(last)[:500])
 
     def close(self):
         for attr in ("_context", "_browser"):
