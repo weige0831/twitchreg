@@ -24,4 +24,6 @@ jobs:
           python -m playwright install chromium
           python -m playwright install-deps chromium
       - name: Run discover
-        run: python discover.py
+        env:
+          PROXY: ${{ secrets.PROXY }}
+        run: xvfb-run -a --server-args="-screen 0 1366x768x24" python discover.py
