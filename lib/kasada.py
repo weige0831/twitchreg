@@ -55,6 +55,16 @@ def _log(msg):
     print(f"[net] {msg}", flush=True)
 
 
+STEALTH_JS = r"""
+Object.defineProperty(navigator,'webdriver',{get:()=>undefined});
+window.chrome = window.chrome || { runtime: {} };
+Object.defineProperty(navigator,'plugins',{get:()=>[1,2,3,4,5]});
+Object.defineProperty(navigator,'languages',{get:()=>['en-US','en']});
+const getParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(p){ if(p==37445) return 'Intel Inc.'; if(p==37446) return 'Intel Iris OpenGL Engine'; return getParameter.call(this,p); };
+"""
+
+
 class BrowserSession:
     def __init__(self, headless=True, proxy=None, page_timeout=60000, debug=True):
         self.headless = headless
@@ -72,6 +82,8 @@ class BrowserSession:
             "--no-sandbox",
             "--disable-blink-features=AutomationControlled",
             "--disable-dev-shm-usage",
+            "--disable-features=IsolateOrigins,site-per-process",
+            "--enable-features=NetworkService,NetworkServiceInProcess",
         ]
         launch_kwargs = {"headless": self.headless, "args": launch_args}
         if self.proxy:
@@ -81,22 +93,21 @@ class BrowserSession:
             viewport={"width": 1366, "height": 850},
             locale="en-US",
             user_agent=UA,
+            java_script_enabled=True,
         )
-        self._context.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined});"
-        )
+        self._context.add_init_script(STEALTH_JS)
         self._page = self._context.new_page()
         self._page.set_default_timeout(self.page_timeout)
 
         if self.debug:
             def on_request(req):
-                if "passport.twitch.tv" in req.url or "kpsdk" in str(req.headers).lower():
-                    ksdk = {k: v[:40] for k, v in req.headers.items() if "kpsdk" in k.lower()}
-                    _log(f"REQ {req.method} {req.url} kpsdk={ksdk}")
+                if "passport.twitch.tv" in req.url:
+                    ksdk = {k: v[:30] for k, v in req.headers.items() if "kpsdk" in k.lower()}
+                    _log(f"REQ {req.method} {req.url.split('/')[-1]} kpsdk={ksdk}")
 
             def on_response(resp):
                 if "passport.twitch.tv" in resp.url:
-                    _log(f"RESP {resp.status} {resp.url}")
+                    _log(f"RESP {resp.status} {resp.url.split('/')[-1]}")
 
             self._page.on("request", on_request)
             self._page.on("response", on_response)
@@ -105,8 +116,20 @@ class BrowserSession:
             self._page.goto(SIGNUP_URL, wait_until="domcontentloaded")
         except Exception:
             self._page.goto(TWITCH_URL, wait_until="domcontentloaded")
+        self._simulate_human()
         self._stabilize()
         return self
+
+    def _simulate_human(self):
+        import random
+        try:
+            for _ in range(6):
+                x = random.randint(100, 1200)
+                y = random.randint(100, 700)
+                self._page.mouse.move(x, y, steps=random.randint(5, 15))
+                self._page.wait_for_timeout(random.randint(100, 400))
+        except Exception:
+            pass
 
     def _stabilize(self):
         for _ in range(30):
