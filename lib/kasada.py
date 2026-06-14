@@ -77,6 +77,7 @@ class BrowserSession:
         self._page = None
 
     def start(self):
+        from urllib.parse import urlparse
         self._pw = sync_playwright().start()
         launch_args = [
             "--no-sandbox",
@@ -87,7 +88,13 @@ class BrowserSession:
         ]
         launch_kwargs = {"headless": self.headless, "args": launch_args}
         if self.proxy:
-            launch_kwargs["proxy"] = {"server": self.proxy}
+            parsed = urlparse(self.proxy)
+            proxy_config = {"server": f"{parsed.scheme or 'socks5'}://{parsed.hostname}:{parsed.port}"}
+            if parsed.username:
+                proxy_config["username"] = parsed.username
+            if parsed.password:
+                proxy_config["password"] = parsed.password
+            launch_kwargs["proxy"] = proxy_config
         self._browser = self._pw.chromium.launch(**launch_kwargs)
         self._context = self._browser.new_context(
             viewport={"width": 1366, "height": 850},

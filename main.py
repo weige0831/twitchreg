@@ -51,16 +51,16 @@ def diagnostics(mail):
     log("=================")
 
 
-def pick_username():
+def pick_username(proxy=None):
     for _ in range(8):
         candidate = random_username()
-        if not username_taken(candidate):
+        if not username_taken(candidate, proxy=proxy):
             return candidate
     return random_username()
 
 
 def register_one(browser, mail):
-    username = pick_username()
+    username = pick_username(proxy=proxy)
     password = random_password()
     birthday = random_birthday()
     email, mail_token = mail.create_address(username)
