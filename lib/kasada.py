@@ -108,12 +108,19 @@ class BrowserSession:
 
         if self.debug:
             def on_request(req):
-                if "passport.twitch.tv" in req.url:
+                if "passport.twitch.tv" in req.url or "k.twitchcdn.net" in req.url:
                     ksdk = {k: v[:30] for k, v in req.headers.items() if "kpsdk" in k.lower()}
-                    _log(f"REQ {req.method} {req.url.split('/')[-1]} kpsdk={ksdk}")
+                    if ksdk:
+                        _log(f"REQ {req.method} {req.url.split('/')[-1][:40]} kpsdk={ksdk}")
 
             def on_response(resp):
-                if "passport.twitch.tv" in resp.url:
+                if "k.twitchcdn.net" in resp.url and "/tl" in resp.url:
+                    try:
+                        body = resp.text()[:200]
+                    except Exception:
+                        body = "<n/a>"
+                    _log(f"KASADA /tl RESP {resp.status}: {body}")
+                elif "passport.twitch.tv" in resp.url:
                     _log(f"RESP {resp.status} {resp.url.split('/')[-1]}")
 
             self._page.on("request", on_request)
