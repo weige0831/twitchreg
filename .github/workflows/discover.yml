@@ -1,0 +1,27 @@
+name: Discover Payload
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - discover.py
+      - .github/workflows/discover.yml
+
+jobs:
+  discover:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
+          python -m playwright install chromium
+          python -m playwright install-deps chromium
+      - name: Run discover
+        run: python discover.py
