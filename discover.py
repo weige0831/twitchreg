@@ -1,9 +1,10 @@
-"""Capture the full modern signup flow: email -> username/password -> birthday,
-logging every passport.twitch.tv request body and the protected_register payload."""
+"""Definitive test: fill the real signup form with a VALID adult birthday and
+capture the protected_register request + response to determine if the GitHub
+Actions IP is blocked or if the earlier failure was just the bad birthday."""
 import json
 import time
 
-import requests
+import requests as req
 from playwright.sync_api import sync_playwright
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -17,10 +18,10 @@ window.__caps = [];
     try {
       const u = (typeof a[0]==='string')?a[0]:(a[0]&&a[0].url)||'';
       const init = a[1]||{};
-      if (u.indexOf('passport.twitch.tv')!==-1 || u.indexOf('protected_register')!==-1 || u.indexOf('/integrity')!==-1) {
+      if (u.indexOf('protected_register')!==-1) {
         let b = init.body;
         if (b && typeof b!=='string'){ try{b=String(b)}catch(e){} }
-        window.__caps.push({url:u, method:init.method||'GET', body: b?b.slice(0,2000):null});
+        window.__caps.push({url:u, body: b?b.slice(0,2000):null});
       }
     } catch(e){}
     return of.apply(this,a);
@@ -33,28 +34,9 @@ def log(m):
     print(f"[d] {m}", flush=True)
 
 
-def make_email():
-    r = requests.post("https://mail.minecraft-cn.net/api/v1/addresses",
-                      json={"username": "tw" + str(int(time.time())), "domain": "olsbvgq.shop"}, timeout=20)
-    d = r.json()
-    return d["email"]
-
-
-def dump_inputs(page):
-    return page.evaluate("""() => {
-        const out = [];
-        document.querySelectorAll('input,select,button').forEach(el => {
-            out.push({tag:el.tagName, type:el.type||'', id:el.id||'', name:el.name||'',
-                      ph:el.placeholder||'', text:(el.innerText||'').slice(0,25),
-                      aria:el.getAttribute('aria-label')||'', auto:el.getAttribute('autocomplete')||''});
-        });
-        return out;
-    }""")
-
-
 def main():
-    email = make_email()
-    username = "tw" + str(int(time.time()))[-8:]
+    email = "tw" + str(int(time.time())) + "@olsbvgq.shop"
+    username = "tw" + str(int(time.time()))[-7:]
     password = "Tw1!secure99aa"
     log(f"email={email} user={username}")
 
@@ -66,8 +48,15 @@ def main():
         page = ctx.new_page()
         page.set_default_timeout(12000)
 
-        responses = []
-        page.on("response", lambda r: responses.append((r.status, r.url)) if "passport.twitch.tv" in r.url else None)
+        resp_log = []
+        def on_response(r):
+            if "protected_register" in r.url or "/integrity" in r.url:
+                try:
+                    body = r.text()[:600]
+                except Exception:
+                    body = "<n/a>"
+                resp_log.append((r.status, r.url, body))
+        page.on("response", on_response)
 
         log("goto signup")
         try:
@@ -76,93 +65,58 @@ def main():
             page.goto("https://www.twitch.tv/signup", wait_until="domcontentloaded")
         page.wait_for_timeout(4000)
 
-        # Step 1: email
-        log("step1: email")
-        try:
-            page.locator("#email-input").first.wait_for(state="visible", timeout=10000)
-            page.locator("#email-input").first.fill(email)
-            page.wait_for_timeout(500)
-            page.locator("button:has-text('Continue')").first.click()
-            log("  clicked Continue")
-        except Exception as e:
-            log(f"  step1 error: {e}")
-        page.wait_for_timeout(4000)
+        # email
+        log("fill email + continue")
+        page.locator("#email-input").first.fill(email)
+        page.wait_for_timeout(400)
+        page.locator("button:has-text('Continue')").first.click()
+        page.wait_for_timeout(3500)
 
-        log("  inputs after email step:")
-        for el in dump_inputs(page):
-            log(f"    {el}")
+        # username + password
+        log("fill username/password")
+        page.locator("#signup-username").first.fill(username)
+        page.locator("#password-input").first.fill(password)
+        page.wait_for_timeout(400)
+        # the Sign Up button is on the same page now; no Continue needed
+        page.wait_for_timeout(1000)
 
-        # Step 2: username + password
-        log("step2: username/password")
-        for sel, val, label in [
-            ("#signup-username", username, "username"),
-            ("input[autocomplete='username']", username, "username2"),
-            ("input[name='username']", username, "username3"),
-        ]:
-            try:
-                page.locator(sel).first.wait_for(state="visible", timeout=4000)
-                page.locator(sel).first.fill(val)
-                log(f"  filled {label}")
-                break
-            except Exception:
-                pass
-        for sel, val, label in [
-            ("#password-input", password, "password"),
-            ("input[type='password']", password, "password2"),
-            ("input[autocomplete='new-password']", password, "password3"),
-        ]:
-            try:
-                page.locator(sel).first.wait_for(state="visible", timeout=4000)
-                page.locator(sel).first.fill(val)
-                log(f"  filled {label}")
-                break
-            except Exception:
-                pass
-        page.wait_for_timeout(500)
-        try:
-            page.locator("button:has-text('Continue')").first.click(timeout=5000)
-            log("  clicked Continue")
-        except Exception as e:
-            log(f"  step2 continue error: {e}")
-        page.wait_for_timeout(4000)
-
-        log("  inputs after user/pass step:")
-        for el in dump_inputs(page):
-            log(f"    {el}")
-
-        # Step 3: birthday
-        log("step3: birthday")
-        try:
-            selects = page.locator("select").all()
-            log(f"  found {len(selects)} selects")
-            for i, s in enumerate(selects):
-                try:
-                    opts = s.locator("option").count()
-                    if opts > 12:
-                        s.select_option(index=5)  # month-ish/day
-                    else:
-                        s.select_option(index=2)
-                    log(f"  select {i}: chose idx")
-                except Exception:
-                    pass
-        except Exception as e:
-            log(f"  birthday error: {e}")
+        # birthday - valid adult
+        log("select birthday")
+        selects = page.locator("select")
+        n = selects.count()
+        log(f"  {n} selects")
+        for i in range(n):
+            aria = selects.nth(i).get_attribute("aria-label") or ""
+            log(f"  select {i}: {aria}")
+            if "month" in aria.lower():
+                selects.nth(i).select_option(label="June")
+            elif "day" in aria.lower():
+                selects.nth(i).select_option(label="15")
+            elif "year" in aria.lower():
+                selects.nth(i).select_option(label="1995")
         page.wait_for_timeout(800)
+
+        # Sign Up
+        log("click Sign Up")
         try:
-            page.locator("button:has-text('Sign Up')").first.click(timeout=5000)
-            log("  clicked Sign Up")
+            page.locator("button:has-text('Sign Up')").first.click(timeout=8000)
         except Exception as e:
-            log(f"  signup click error: {e}")
-        page.wait_for_timeout(6000)
+            log(f"signup click error: {e}")
+        page.wait_for_timeout(8000)
 
-        log("=== ALL passport responses ===")
-        for st, u in responses:
-            log(f"  {st} {u}")
-
+        # report
         caps = page.evaluate("() => window.__caps || []")
-        log(f"=== {len(caps)} captured passport/integrity requests ===")
+        log(f"=== {len(caps)} protected_register BODIES ===")
         for c in caps:
-            log(json.dumps(c)[:1600])
+            log(f"BODY: {c.get('body')}")
+        log(f"=== {len(resp_log)} responses ===")
+        for st, u, body in resp_log:
+            log(f"RESP {st} {u} :: {body}")
+
+        # check page state for errors / verification prompts
+        log(f"page url after submit: {page.url}")
+        body_text = page.evaluate("() => document.body ? document.body.innerText.slice(0,800) : ''")
+        log(f"page text: {body_text[:500]}")
         browser.close()
 
 
