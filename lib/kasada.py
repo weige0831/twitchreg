@@ -43,7 +43,7 @@ async (body) => {
             body: body,
         });
         const text = await resp.text();
-        return { status: resp.status, body: text.slice(0, 1000) };
+        return { status: resp.status, body: text.slice(0, 1200) };
     } catch (e) {
         return { status: 0, body: String(e) };
     }
@@ -51,16 +51,16 @@ async (body) => {
 """ % REGISTER_URL
 
 
-class BrowserSession:
-    """Manages a headless browser that runs the Kasada anti-bot script
-    naturally. All Twitch API calls (integrity + protected_register) are made
-    through the page's own fetch(), so Kasada's injected proof headers are
-    applied automatically. Email handling stays pure-protocol."""
+def _log(msg):
+    print(f"[net] {msg}", flush=True)
 
-    def __init__(self, headless=True, proxy=None, page_timeout=60000):
+
+class BrowserSession:
+    def __init__(self, headless=True, proxy=None, page_timeout=60000, debug=True):
         self.headless = headless
         self.proxy = proxy
         self.page_timeout = page_timeout
+        self.debug = debug
         self._pw = None
         self._browser = None
         self._context = None
@@ -87,6 +87,20 @@ class BrowserSession:
         )
         self._page = self._context.new_page()
         self._page.set_default_timeout(self.page_timeout)
+
+        if self.debug:
+            def on_request(req):
+                if "passport.twitch.tv" in req.url or "kpsdk" in str(req.headers).lower():
+                    ksdk = {k: v[:40] for k, v in req.headers.items() if "kpsdk" in k.lower()}
+                    _log(f"REQ {req.method} {req.url} kpsdk={ksdk}")
+
+            def on_response(resp):
+                if "passport.twitch.tv" in resp.url:
+                    _log(f"RESP {resp.status} {resp.url}")
+
+            self._page.on("request", on_request)
+            self._page.on("response", on_response)
+
         try:
             self._page.goto(SIGNUP_URL, wait_until="domcontentloaded")
         except Exception:
@@ -112,17 +126,12 @@ class BrowserSession:
             except Exception as e:
                 result = {"status": 0, "token": None, "raw": str(e)}
             last = result
+            if self.debug:
+                _log(f"integrity result: {json.dumps(result)[:300]}")
             if result.get("token"):
                 return result["token"]
             time.sleep(delay)
         raise RuntimeError("Integrity token harvest failed: %s" % json.dumps(last)[:500])
-
-    def get_cookies(self):
-        cookies = {}
-        for domain in ("https://www.twitch.tv", "https://passport.twitch.tv"):
-            for c in self._context.cookies(domain):
-                cookies[c["name"]] = c["value"]
-        return cookies
 
     def user_agent(self):
         return UA
@@ -137,6 +146,8 @@ class BrowserSession:
             except Exception as e:
                 result = {"status": 0, "body": str(e)}
             last = result
+            if self.debug:
+                _log(f"register HTTP {result.get('status')}: {str(result.get('body'))[:300]}")
             if result.get("status") and result["status"] > 0:
                 try:
                     data = _json.loads(result["body"])
