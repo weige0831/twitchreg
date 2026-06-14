@@ -80,20 +80,33 @@ def main():
         # the Sign Up button is on the same page now; no Continue needed
         page.wait_for_timeout(1000)
 
-        # birthday - valid adult
-        log("select birthday")
-        selects = page.locator("select")
-        n = selects.count()
-        log(f"  {n} selects")
-        for i in range(n):
-            aria = selects.nth(i).get_attribute("aria-label") or ""
-            log(f"  select {i}: {aria}")
-            if "month" in aria.lower():
-                selects.nth(i).select_option(label="June")
-            elif "day" in aria.lower():
-                selects.nth(i).select_option(label="15")
-            elif "year" in aria.lower():
-                selects.nth(i).select_option(label="1995")
+        # birthday - valid adult, via JS for robustness
+        log("select birthday via JS")
+        bd_result = page.evaluate("""() => {
+            const out = [];
+            document.querySelectorAll('select').forEach(s => {
+                const aria = s.getAttribute('aria-label') || '';
+                const opts = [...s.options].map(o => ({text:o.text, value:o.value}));
+                let target = null;
+                if (aria.toLowerCase().includes('month')) {
+                    target = opts.find(o => o.text === 'June') || opts[1];
+                } else if (aria.toLowerCase().includes('day')) {
+                    target = opts.find(o => o.text === '15') || opts[15];
+                } else if (aria.toLowerCase().includes('year')) {
+                    target = opts.find(o => o.text === '1995')
+                        || opts.find(o => parseInt(o.text) <= 2000 && parseInt(o.text) > 1950)
+                        || opts[Math.min(40, opts.length-1)];
+                }
+                if (target) {
+                    s.value = target.value;
+                    s.dispatchEvent(new Event('input', {bubbles:true}));
+                    s.dispatchEvent(new Event('change', {bubbles:true}));
+                    out.push({aria, picked: target.text});
+                }
+            });
+            return out;
+        }""")
+        log(f"  birthday: {bd_result}")
         page.wait_for_timeout(800)
 
         # Sign Up
