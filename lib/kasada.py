@@ -15,13 +15,13 @@ UA = (
 )
 
 INTEGRITY_JS = """
-async () => {
+async (action) => {
     try {
         const resp = await fetch("%s", {
             method: "POST",
             credentials: "include",
             headers: { "Content-Type": "text/plain;charset=UTF-8" },
-            body: "",
+            body: JSON.stringify({ action: action }),
         });
         const text = await resp.text();
         let data = {};
@@ -118,11 +118,11 @@ class BrowserSession:
             time.sleep(0.5)
         time.sleep(3)
 
-    def get_integrity(self, retries=3, delay=2):
+    def get_integrity(self, action="register", retries=3, delay=2):
         last = None
         for _ in range(retries):
             try:
-                result = self._page.evaluate(INTEGRITY_JS)
+                result = self._page.evaluate(INTEGRITY_JS, action)
             except Exception as e:
                 result = {"status": 0, "token": None, "raw": str(e)}
             last = result
